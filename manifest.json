@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "WhatsApp Bulk Sender Pro",
+  "version": "2.0",
+  "description": "Send bulk messages on WhatsApp Web efficiently",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://web.whatsapp.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WhatsApp Bulk Sender"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://web.whatsapp.com/*"]
+    }
+  ]
+}
