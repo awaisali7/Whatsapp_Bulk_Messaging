@@ -52,7 +52,7 @@ class BulkSendManager {
                     url: 'https://web.whatsapp.com',
                     active: true
                 });
-                await this.delay(5000); // Increased wait time for WhatsApp to load
+                await this.delay(3000); // Wait for WhatsApp to load
             }
 
             this.isProcessing = true;
@@ -89,7 +89,7 @@ class BulkSendManager {
             try {
                 console.log(`Processing ${i + 1}/${phoneNumbers.length}: ${phoneNumber}`);
                 
-                const success = await this.sendMessageEnhanced(phoneNumber, message);
+                const success = await this.sendMessage(phoneNumber, message);
                 
                 if (success) {
                     this.stats.sent++;
@@ -129,147 +129,51 @@ class BulkSendManager {
         });
     }
 
-    async sendMessageEnhanced(phoneNumber, message) {
+    async sendMessage(phoneNumber, message) {
         return new Promise(async (resolve) => {
-            let tabId = null;
-            let messageListener = null;
-            let timeout = null;
-            let checkInterval = null;
-            
             try {
                 const cleanNumber = phoneNumber.replace(/[^\d+]/g, '');
                 const whatsappUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}&text=${encodeURIComponent(message)}`;
-                
-                console.log(`Creating enhanced tab for ${cleanNumber}...`);
                 
                 // Create new tab
                 const tab = await chrome.tabs.create({
                     url: whatsappUrl,
                     active: false
                 });
-                
-                tabId = tab.id;
-                console.log(`Enhanced tab created with ID: ${tabId}`);
 
-                // Enhanced timeout - increased to 90 seconds
-                timeout = setTimeout(() => {
-                    console.log(`Enhanced timeout reached for tab ${tabId}`);
-                    cleanup();
+                // Set up timeout
+                const timeout = setTimeout(() => {
+                    chrome.tabs.remove(tab.id).catch(() => {});
                     resolve(false);
-                }, 90000);
+                }, 30000); // 30 second timeout
 
-                // Enhanced message listener with better status tracking
-                messageListener = (msg, sender) => {
-                    if (sender.tab?.id === tabId) {
-                        console.log(`Enhanced: Received message from tab ${tabId}:`, msg.type);
+                // Listen for message status
+                const messageListener = (msg, sender) => {
+                    if (sender.tab?.id === tab.id) {
+                        clearTimeout(timeout);
+                        chrome.runtime.onMessage.removeListener(messageListener);
                         
-                        if (msg.type === 'MESSAGE_SENT') {
-                            console.log(`Enhanced: Message sent successfully for tab ${tabId}`);
-                            cleanup();
-                            resolve(true);
-                        } else if (msg.type === 'MESSAGE_FAILED') {
-                            console.log(`Enhanced: Message failed for tab ${tabId}`);
-                            cleanup();
-                            resolve(false);
-                        }
+                        // Close tab after a short delay
+                        setTimeout(() => {
+                            chrome.tabs.remove(tab.id).catch(() => {});
+                        }, 2000);
+                        
+                        resolve(msg.type === 'MESSAGE_SENT');
                     }
                 };
 
                 chrome.runtime.onMessage.addListener(messageListener);
-                
-                // Enhanced tab status checking
-                let tabCheckAttempts = 0;
-                const maxTabCheckAttempts = 45; // Check for 45 seconds
-                
-                checkInterval = setInterval(async () => {
-                    tabCheckAttempts++;
-                    
-                    try {
-                        // Check if tab still exists and is not loading
-                        const tabInfo = await chrome.tabs.get(tabId);
-                        console.log(`Enhanced tab check ${tabCheckAttempts}: status=${tabInfo.status}, url=${tabInfo.url}`);
-                        
-                        // If tab has navigated away from send URL, it might indicate completion
-                        if (tabInfo.url && !tabInfo.url.includes('/send?') && tabInfo.url.includes('web.whatsapp.com')) {
-                            console.log(`Enhanced: Tab navigated away from send URL, considering as potential success`);
-                            // Give it more time to complete the send process
-                            setTimeout(() => {
-                                if (messageListener) { // Only resolve if we haven't already
-                                    console.log(`Enhanced: Assuming success after navigation`);
-                                    cleanup();
-                                    resolve(true);
-                                }
-                            }, 8000);
-                        }
-                        
-                        // Check for too many attempts
-                        if (tabCheckAttempts >= maxTabCheckAttempts) {
-                            console.log(`Enhanced: Tab check timeout after ${tabCheckAttempts} attempts`);
-                            cleanup();
-                            resolve(false);
-                        }
-                        
-                    } catch (tabError) {
-                        console.log(`Enhanced: Tab ${tabId} no longer exists or error:`, tabError.message);
-                        // Tab might have been closed, which could indicate completion
-                        cleanup();
-                        resolve(false);
-                    }
-                }, 2000); // Check every 2 seconds
-                
-                // Function to clean up resources
-                const cleanup = () => {
-                    if (timeout) {
-                        clearTimeout(timeout);
-                        timeout = null;
-                    }
-                    
-                    if (checkInterval) {
-                        clearInterval(checkInterval);
-                        checkInterval = null;
-                    }
-                    
-                    if (messageListener) {
-                        chrome.runtime.onMessage.removeListener(messageListener);
-                        messageListener = null;
-                    }
-                    
-                    if (tabId) {
-                        // Increased delay before closing tab to ensure message is fully processed
-                        setTimeout(() => {
-                            chrome.tabs.remove(tabId).catch((error) => {
-                                console.log(`Enhanced: Tab ${tabId} already closed or error:`, error.message);
-                            });
-                        }, 8000); // Increased delay to 8 seconds
-                    }
-                };
 
             } catch (error) {
-                console.error('Enhanced error in sendMessage:', error);
-                
-                // Clean up on error
-                if (timeout) clearTimeout(timeout);
-                if (checkInterval) clearInterval(checkInterval);
-                if (messageListener) chrome.runtime.onMessage.removeListener(messageListener);
-                if (tabId) {
-                    setTimeout(() => {
-                        chrome.tabs.remove(tabId).catch(() => {});
-                    }, 2000);
-                }
-                
+                console.error('Error in sendMessage:', error);
                 resolve(false);
             }
         });
     }
 
-    // Legacy method for backward compatibility
-    async sendMessage(phoneNumber, message) {
-        return this.sendMessageEnhanced(phoneNumber, message);
-    }
-
     handleMessageStatus(data) {
         // This is called when content script reports message status
-        console.log('Enhanced message status:', data);
+        console.log('Message status:', data);
     }
 
     notifyPopup(type, data) {
@@ -284,14 +188,14 @@ class BulkSendManager {
     }
 }
 
-// Initialize the enhanced manager
+// Initialize the manager
 const bulkSendManager = new BulkSendManager();
 
 // Handle extension startup
 chrome.runtime.onStartup.addListener(() => {
-    console.log('Enhanced WhatsApp Bulk Sender started');
+    console.log('WhatsApp Bulk Sender started');
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('Enhanced WhatsApp Bulk Sender installed');
+    console.log('WhatsApp Bulk Sender installed');
 });
